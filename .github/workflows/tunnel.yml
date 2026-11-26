@@ -1,0 +1,44 @@
+name: Start Tunnel Server
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup WireGuard and UDP2RAW
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wireguard wireguard-tools iptables wget tar
+          wget https://github.com/wangyu-/udp2raw/releases/download/20200818.0/udp2raw_binaries.tar.gz
+          tar -zxvf udp2raw_binaries.tar.gz
+          sudo mv udp2raw_amd64 /usr/bin/udp2raw
+          sudo chmod +x /usr/bin/udp2raw
+
+          # توليد المفاتيح للسيرفر والهاتف
+          SERVER_PRIV=$(wg genkey)
+          SERVER_PUB=$(echo "$SERVER_PRIV" | wg pubkey)
+          CLIENT_PRIV=$(wg genkey)
+          CLIENT_PUB=$(echo "$CLIENT_PRIV" | wg pubkey)
+          
+          echo "=========================================="
+          echo "SERVER_PRIVATE_KEY=$SERVER_PRIV"
+          echo "SERVER_PUBLIC_KEY=$SERVER_PUB"
+          echo "CLIENT_PRIVATE_KEY=$CLIENT_PRIV"
+          echo "CLIENT_PUBLIC_KEY=$CLIENT_PUB"
+          echo "SERVER_IP=$(curl -s ifconfig.me)"
+          echo "=========================================="
+          
+          echo -e "[Interface]\nPrivateKey = $SERVER_PRIV\nAddress = 10.0.0.1/24\nListenPort = 51820\nPostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE\nPostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE\n\n[Peer]\nPublicKey = $CLIENT_PUB\nAllowedIPs = 10.0.0.2/32" | sudo tee /etc/wireguard/wg0.conf
+          
+          sudo sysctl -w net.ipv4.ip_forward=1
+          sudo wg-quick up wg0
+          
+      - name: Start UDP2RAW
+        run: |
+          sudo udp2raw -s -l 0.0.0.0:443 -r 127.0.0.1:51820 --raw-mode faketcp -k "mypassword" &
+          sleep 5
+          
+      - name: Keep Alive
+        run: |
+          sleep 21000
